@@ -1,6 +1,7 @@
 // ✅ socket.js
 import { io } from 'socket.io-client'
-export const socket = io('https://thinknet.onrender.com', { autoConnect: false })
+
+export const socket = io('http://localhost:3001/', { autoConnect: false })
 
 let callbacks = {}
 
@@ -12,7 +13,9 @@ export const setupSocketListeners = ({
   onWin,
   onTimeout,
   onOpponentLeft,
-  onJoinedRoom // ✅ 이 부분 추가!
+  onJoinedRoom,
+  onReceiveOpponent,
+  onReceiveWords
 }) => {
   callbacks = {
     onStartGame,
@@ -22,7 +25,9 @@ export const setupSocketListeners = ({
     onWin,
     onTimeout,
     onOpponentLeft,
-    onJoinedRoom
+    onJoinedRoom,
+    onReceiveOpponent,
+    onReceiveWords
   }
 
   socket.on('startGame', onStartGame)
@@ -33,12 +38,26 @@ export const setupSocketListeners = ({
   socket.on('timeout', onTimeout)
   socket.on('opponentLeft', onOpponentLeft)
 
+  // ✅ roomId 수신
   socket.on('joinedRoom', ({ roomId }) => {
     console.log('🎯 roomId 수신됨:', roomId)
-    callbacks.onJoinedRoom?.(roomId) // ✅ 콜백 실행
+    callbacks.onJoinedRoom?.(roomId)
+  })
+
+  // ✅ 상대방 닉네임 수신
+  socket.on('opponentInfo', ({ nickname }) => {
+    console.log('🙋 상대방 닉네임 수신됨:', nickname)
+    callbacks.onReceiveOpponent?.(nickname)
+  })
+
+  // ✅ 제출 단어 수신
+  socket.on('bothSubmitted', ({ a, b }) => {
+    console.log('📨 단어 제출 완료:', a, b)
+    callbacks.onReceiveWords?.({ a, b })
   })
 }
 
+// 연결/해제/이벤트 발생 함수
 export const connectSocket = () => socket.connect()
 export const disconnectSocket = () => socket.disconnect()
 export const joinRoom = (nickname) => socket.emit('joinRoom', { nickname })
