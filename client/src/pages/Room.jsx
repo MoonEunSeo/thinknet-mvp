@@ -12,7 +12,7 @@ export default function Room() {
   const [nickname, setNickname] = useState('')
   const [step, setStep] = useState('intro')
   const [word, setWord] = useState('')
-  const [roomId, setRoomId] = useState('')
+  const [roomId, setRoomId] = useState(null)
   const [count, setCount] = useState(1)
   const [history, setHistory] = useState([])
   const [timer, setTimer] = useState(15)
@@ -20,17 +20,21 @@ export default function Room() {
   useEffect(() => {
     if (step === 'input') {
       const interval = setInterval(() => setTimer(t => t - 1), 1000)
-      if (timer <= 0) {
-        setStep('timeout')
-        clearInterval(interval)
-      }
       return () => clearInterval(interval)
     }
-  }, [step, timer])
+  }, [step])
 
   useEffect(() => {
+    if (timer <= 0 && step === 'input') {
+      setStep('timeout')
+    }
+  }, [timer, step])
+
+  useEffect(() => {
+    console.log('📡 소켓 리스너 등록 시작')
     setupSocketListeners({
       onStartGame: ({ round }) => {
+        console.log('🎮 게임 시작 - 라운드:', round)
         setStep('input')
         setCount(round)
         setTimer(15)
@@ -47,17 +51,36 @@ export default function Room() {
         setHistory(history.map(h => h.a))
       },
       onTimeout: () => setStep('timeout'),
-      onOpponentLeft: () => setStep('disconnected')
+      onOpponentLeft: () => setStep('disconnected'),
+      onJoinedRoom: (id) => {
+        console.log('🎯 roomId 수신됨:', id)
+        setRoomId(id)
+      }
     })
   }, [])
 
+  useEffect(() => {
+    console.log('🧩 roomId 상태 변경됨:', roomId)
+  }, [roomId])
+
   const handleStart = () => {
+    console.log('🚀 소켓 연결 및 방 참가 시도')
     connectSocket()
-    joinRoom(nickname)
-    setStep('waiting')
+
+    // 소켓 연결 지연 방지 - 연결 후 emit
+    socket.once('connect', () => {
+      console.log("🔌 socket.id (연결 완료):", socket.id)
+      joinRoom(nickname)
+      setStep('waiting')
+    })
   }
 
   const handleSubmit = () => {
+    if (!roomId) {
+      console.warn('🚨 아직 roomId가 설정되지 않았어요!')
+      return
+    }
+    console.log('📨 단어 제출 시도:', word, 'roomId:', roomId)
     submitWord(roomId, word)
     setWord('')
   }
@@ -100,7 +123,7 @@ export default function Room() {
           <button
             className="mt-4 bg-green-600 text-white px-4 py-2 rounded"
             onClick={handleSubmit}
-            disabled={!word.trim()}
+            disabled={!word.trim() || !roomId}
           >
             제출하기
           </button>

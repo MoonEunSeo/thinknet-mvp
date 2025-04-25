@@ -4,22 +4,29 @@ const express = require('express')
 const http = require('http')
 const { Server } = require('socket.io')
 const { v4: uuidv4 } = require('uuid')
-
 const app = express()
 const server = http.createServer(app)
 const io = new Server(server, {
-  cors: { origin: '*' }
+  cors: {
+    origin: '*'
+  }
 })
 
 const PORT = process.env.PORT || 3001
-const rooms = {} // roomId: { users: [], words: {}, timer: null, history: [], round: 1 }
+const rooms = {} // roomId: { users: [], words: {}, timer: null, history: [] }
 
 io.on('connection', socket => {
   console.log('✅ 연결됨:', socket.id)
 
   socket.on('joinRoom', ({ nickname }) => {
-    let roomId = Object.keys(rooms).find(id => rooms[id].users.length === 1)
-
+    // 방 찾기 or 새 방 만들기
+    let roomId = null
+    for (const id in rooms) {
+      if (rooms[id].users.length === 1) {
+        roomId = id
+        break
+      }
+    }
     if (!roomId) {
       roomId = uuidv4()
       rooms[roomId] = { users: [], words: {}, history: [], round: 1 }
@@ -29,54 +36,49 @@ io.on('connection', socket => {
     rooms[roomId].users.push({ id: socket.id, nickname })
     console.log(`👥 ${nickname} joined room ${roomId}`)
 
-    socket.emit('joinedRoom', { roomId })
-
-    setTimeout(() => {
-      const room = rooms[roomId]
-      if (room && room.users.length === 2) {
-        io.to(roomId).emit('startGame', { round: 1 })
-        startRound(roomId)
-      } else {
-        socket.emit('waiting')
-      }
-    }, 200)
+    // 두 명이면 게임 시작
+    if (rooms[roomId].users.length === 2) {
+      io.to(roomId).emit('startGame', { round: 1 })
+      startRound(roomId)
+    } else {
+      socket.emit('waiting')
+    }
   })
 
   socket.on('submitWord', ({ roomId, word }) => {
     const room = rooms[roomId]
     if (!room) return
+    room.words[socket.id] = word
 
-    room.words[socket.id] = word.trim().toLowerCase()
-
-    const submittedCount = Object.keys(room.words).length
-    if (submittedCount < 2) return
-
-    const [a, b] = Object.values(room.words)
-    const match = a === b
-
-    room.history.push({ round: room.round, a, b })
-
-    if (match) {
-      io.to(roomId).emit('youWin', {
-        words: [a],
-        history: room.history
-      })
-      clearRoom(roomId)
+    if (Object.keys(room.words).length === 2) {
+      const [a, b] = Object.values(room.words)
+      room.history.push({ round: room.round, a, b })
+      const match = a.trim().toLowerCase() === b.trim().toLowerCase()
+      if (match) {
+        io.to(roomId).emit('youWin', {
+          words: [a],
+          history: room.history
+        })
+        clearRoom(roomId)
+      } else {
+        io.to(roomId).emit('matchFail', {
+          a, b,
+          round: room.round + 1
+        })
+        room.words = {}
+        room.round++
+        startRound(roomId)
+      }
     } else {
-      room.round++
-      room.words = {}
-      io.to(roomId).emit('matchFail', { a, b, round: room.round })
-      startRound(roomId)
+      socket.to(roomId).emit('waitingOther')
     }
   })
 
   socket.on('disconnect', () => {
     console.log('❌ 연결 해제:', socket.id)
-
     for (const roomId in rooms) {
       const room = rooms[roomId]
       const userIndex = room.users.findIndex(u => u.id === socket.id)
-
       if (userIndex !== -1) {
         room.users.splice(userIndex, 1)
         io.to(roomId).emit('opponentLeft')
@@ -89,9 +91,7 @@ io.on('connection', socket => {
   function startRound(roomId) {
     const room = rooms[roomId]
     if (!room) return
-
     if (room.timer) clearTimeout(room.timer)
-
     room.timer = setTimeout(() => {
       io.to(roomId).emit('timeout')
       clearRoom(roomId)
@@ -101,7 +101,6 @@ io.on('connection', socket => {
   function clearRoom(roomId) {
     const room = rooms[roomId]
     if (!room) return
-
     if (room.timer) clearTimeout(room.timer)
     delete rooms[roomId]
   }
